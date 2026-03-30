@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Upload, Select, Button, ConfigProvider, message, Card, Spin, Typography, Divider, Checkbox } from 'antd';
-import { InboxOutlined, SettingOutlined, FileTextOutlined, SendOutlined, CheckCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Upload, Select, Button, ConfigProvider, message, Card, Spin, Typography, Divider, Checkbox, Space } from 'antd';
+import type { UploadFile } from 'antd';
+import { InboxOutlined, SettingOutlined, FileTextOutlined, SendOutlined, CheckCircleOutlined, DownloadOutlined, FileSyncOutlined } from '@ant-design/icons';
 import { GoogleGenAI } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 
@@ -12,26 +13,49 @@ const App = () => {
   const [grade, setGrade] = useState('Lớp 1');
   const [isDigitalComp, setIsDigitalComp] = useState(true);
   const [isAI, setIsAI] = useState(false);
-  const [lessonFile, setLessonFile] = useState<any>(null);
-  const [ppctFile, setPpctFile] = useState<any>(null);
+  
+  // File states
+  const [lessonFileList, setLessonFileList] = useState<UploadFile[]>([]);
+  const [ppctFileList, setPpctFileList] = useState<UploadFile[]>([]);
+  
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const handleGenerate = async () => {
-    if (!lessonFile) {
-      message.error('Vui lòng tải lên file giáo án!');
+    if (lessonFileList.length === 0) {
+      message.error('Vui lòng tải lên file giáo án gốc!');
       return;
     }
 
     setLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const lessonBase64 = await fileToBase64(lessonFile.originFileObj);
-      let ppctBase64 = null;
-      if (ppctFile) {
-        ppctBase64 = await fileToBase64(ppctFile.originFileObj);
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('Thiếu API Key của Gemini. Vui lòng kiểm tra cấu hình.');
       }
+      
+      const genAI = new GoogleGenAI({ apiKey });
+      
+      const lessonFile = lessonFileList[0].originFileObj as File;
+      const lessonBase64 = await fileToBase64(lessonFile);
+      
+      let ppctBase64 = null;
+      let ppctFile = null;
+      if (ppctFileList.length > 0) {
+        ppctFile = ppctFileList[0].originFileObj as File;
+        ppctBase64 = await fileToBase64(ppctFile);
+      }
+
+      // Detection of MIME type for DOCX support
+      const getMimeType = (file: File) => {
+        if (file.type) return file.type;
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        if (ext === 'doc') return 'application/msword';
+        if (ext === 'pdf') return 'application/pdf';
+        if (ext === 'txt') return 'text/plain';
+        return 'application/octet-stream';
+      };
 
       const prompt = `Bạn là một chuyên gia giáo dục về năng lực số. 
       Dựa trên tài liệu giáo án và PPCT (nếu có) được cung cấp, hãy soạn một kế hoạch bài dạy (giáo án) tập trung vào việc phát triển năng lực số cho học sinh.
@@ -52,14 +76,24 @@ const App = () => {
 
       const parts: any[] = [
         { text: prompt },
-        { inlineData: { data: lessonBase64, mimeType: lessonFile.type || 'application/pdf' } }
+        { 
+          inlineData: { 
+            data: lessonBase64, 
+            mimeType: getMimeType(lessonFile)
+          } 
+        }
       ];
 
-      if (ppctBase64) {
-        parts.push({ inlineData: { data: ppctBase64, mimeType: ppctFile.type || 'application/pdf' } });
+      if (ppctBase64 && ppctFile) {
+        parts.push({ 
+          inlineData: { 
+            data: ppctBase64, 
+            mimeType: getMimeType(ppctFile)
+          } 
+        });
       }
 
-      const response = await ai.models.generateContent({
+      const response = await (genAI as any).models.generateContent({
         model: "gemini-1.5-flash",
         contents: [{ role: 'user', parts: parts }],
       });
@@ -108,7 +142,7 @@ const App = () => {
               icon={<SettingOutlined />} 
               ghost 
               className="hover:bg-blue-500 border-blue-300 h-10 px-6 rounded-full"
-              onClick={() => message.info('Hệ thống đã được cấu hình sẵn.')}
+              onClick={() => message.info('Hệ thống đã được cấu hình sẵn. Vui lòng tải file để bắt đầu.')}
             >
               Cấu hình
             </Button>
@@ -127,7 +161,7 @@ const App = () => {
               title={<span className="text-blue-700 font-black text-lg flex items-center gap-3"><FileTextOutlined /> THÔNG TIN BÀI DẠY</span>}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
+                <div translate="no" className="notranslate">
                   <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-tighter">Môn học</label>
                   <Select 
                     className="w-full h-12" 
@@ -135,20 +169,20 @@ const App = () => {
                     onChange={setSubject}
                     size="large"
                   >
-                    <Option value="Toán học">Toán học</Option>
-                    <Option value="Ngữ văn">Ngữ văn</Option>
-                    <Option value="Tiếng Anh">Tiếng Anh</Option>
-                    <Option value="Vật lý">Vật lý</Option>
-                    <Option value="Hóa học">Hóa học</Option>
-                    <Option value="Sinh học">Sinh học</Option>
-                    <Option value="Lịch sử">Lịch sử</Option>
-                    <Option value="Địa lý">Địa lý</Option>
-                    <Option value="Tin học">Tin học</Option>
-                    <Option value="GDCD">GDCD</Option>
-                    <Option value="GDTC">Giáo dục thể chất (GDTC)</Option>
+                    <Option value="Toán học" translate="no">Toán học</Option>
+                    <Option value="Ngữ văn" translate="no">Ngữ văn</Option>
+                    <Option value="Tiếng Anh" translate="no">Tiếng Anh</Option>
+                    <Option value="Vật lý" translate="no">Vật lý</Option>
+                    <Option value="Hóa học" translate="no">Hóa học</Option>
+                    <Option value="Sinh học" translate="no">Sinh học</Option>
+                    <Option value="Lịch sử" translate="no">Lịch sử</Option>
+                    <Option value="Địa lý" translate="no">Địa lý</Option>
+                    <Option value="Tin học" translate="no">Tin học</Option>
+                    <Option value="GDCD" translate="no">GDCD</Option>
+                    <Option value="GDTC" translate="no">Giáo dục thể chất (GDTC)</Option>
                   </Select>
                 </div>
-                <div>
+                <div translate="no" className="notranslate">
                   <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-tighter">Khối lớp</label>
                   <Select 
                     className="w-full h-12" 
@@ -157,7 +191,7 @@ const App = () => {
                     size="large"
                   >
                     {[...Array(12)].map((_, i) => (
-                      <Option key={i} value={`Lớp ${i + 1}`}>{`Lớp ${i + 1}`}</Option>
+                      <Option key={i} value={`Lớp ${i + 1}`} translate="no">{`Lớp ${i + 1}`}</Option>
                     ))}
                   </Select>
                 </div>
@@ -187,7 +221,7 @@ const App = () => {
             {/* Upload Section */}
             <Card 
               className="shadow-xl border-blue-100 rounded-3xl overflow-hidden"
-              title={<span className="text-blue-700 font-black text-lg flex items-center gap-3"><InboxOutlined /> TÀI LIỆU ĐẦU VÀO</span>}
+              title={<span className="text-blue-700 font-black text-lg flex items-center gap-3" translate="no"><InboxOutlined /> TÀI LIỆU ĐẦU VÀO</span>}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-3">
@@ -195,11 +229,13 @@ const App = () => {
                   <Upload.Dragger 
                     className="bg-blue-50/30 border-dashed border-blue-200 hover:border-blue-500 transition-all rounded-2xl"
                     multiple={false}
+                    accept=".pdf,.docx,.doc,.txt"
+                    fileList={lessonFileList}
                     beforeUpload={(file) => {
-                      setLessonFile({ originFileObj: file, type: file.type });
+                      setLessonFileList([file]);
                       return false;
                     }}
-                    onRemove={() => setLessonFile(null)}
+                    onRemove={() => setLessonFileList([])}
                     maxCount={1}
                   >
                     <p className="ant-upload-drag-icon"><InboxOutlined className="text-blue-500 text-5xl" /></p>
@@ -212,11 +248,13 @@ const App = () => {
                   <Upload.Dragger 
                     className="bg-purple-50/30 border-dashed border-purple-200 hover:border-purple-500 transition-all rounded-2xl"
                     multiple={false}
+                    accept=".pdf,.docx,.doc,.txt"
+                    fileList={ppctFileList}
                     beforeUpload={(file) => {
-                      setPpctFile({ originFileObj: file, type: file.type });
+                      setPpctFileList([file]);
                       return false;
                     }}
-                    onRemove={() => setPpctFile(null)}
+                    onRemove={() => setPpctFileList([])}
                     maxCount={1}
                   >
                     <p className="ant-upload-drag-icon"><InboxOutlined className="text-purple-500 text-5xl" /></p>
@@ -292,7 +330,7 @@ const App = () => {
                 </li>
                 <li className="flex gap-5">
                   <span className="flex-shrink-0 w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center text-sm font-black shadow-lg">2</span>
-                  <p className="text-sm leading-relaxed opacity-90 font-medium">Tải lên file <b>Giáo án gốc</b> (PDF/Docx) để AI hiểu nội dung cốt lõi.</p>
+                  <p className="text-sm leading-relaxed opacity-90 font-medium">Tải lên file <b>Giáo án gốc</b> (PDF/Docx/Txt) bằng cách kéo thả hoặc chọn file.</p>
                 </li>
                 <li className="flex gap-5">
                   <span className="flex-shrink-0 w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center text-sm font-black shadow-lg">3</span>
